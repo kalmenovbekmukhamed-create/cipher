@@ -160,28 +160,40 @@ div[data-testid="stSelectbox"] > div > div {
 """, unsafe_allow_html=True)
 
 
-# ── Futures-only pairs (not on Binance spot) ─────────────────────────────────
-FUTURES_PAIRS = {"XPLUSDT", "TRUMPUSDT", "MEMESUSDT"}
+# ── Coin ID map for CoinGecko ─────────────────────────────────────────────────
+COINGECKO_IDS = {
+    "BTCUSDT":  "bitcoin",
+    "ETHUSDT":  "ethereum",
+    "SOLUSDT":  "solana",
+    "BNBUSDT":  "binancecoin",
+    "XRPUSDT":  "ripple",
+    "DOGEUSDT": "dogecoin",
+    "XPLUSDT":  "xplus",
+}
 
-# ── Data ──────────────────────────────────────────────────────────────────────
+INTERVAL_DAYS = {
+    "1m": 1, "5m": 3, "15m": 7,
+    "1h": 14, "4h": 60, "1d": 300,
+}
+
+# ── Data — CoinGecko OHLC (no geo-restrictions, free, no key needed) ──────────
 @st.cache_data(ttl=60)
 def fetch_binance(symbol: str, interval: str, limit: int = 300) -> pd.DataFrame:
-    if symbol in FUTURES_PAIRS:
-        url = "https://fapi.binance.com/fapi/v1/klines"
-    else:
-        url = "https://api.binance.com/api/v3/klines"
-    r = requests.get(url, params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=10)
-    if r.status_code == 400 and symbol not in FUTURES_PAIRS:
-        url = "https://fapi.binance.com/fapi/v1/klines"
-        r = requests.get(url, params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=10)
+    coin_id = COINGECKO_IDS.get(symbol, "bitcoin")
+    days    = INTERVAL_DAYS.get(interval, 14)
+
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
+    r   = requests.get(url, params={"vs_currency": "usd", "days": days}, timeout=15)
     r.raise_for_status()
-    cols = ["open_time","open","high","low","close","volume",
-            "close_time","qav","trades","tbbav","tbqav","ignore"]
-    df = pd.DataFrame(r.json(), columns=cols)
-    for c in ["open","high","low","close","volume"]:
-        df[c] = df[c].astype(float)
+    data = r.json()  # [[timestamp, open, high, low, close], ...]
+
+    df = pd.DataFrame(data, columns=["open_time","open","high","low","close"])
     df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
-    return df.reset_index(drop=True)
+    df["volume"]    = df["close"] * 1000  # CoinGecko OHLC has no volume; use proxy
+    for c in ["open","high","low","close"]:
+        df[c] = df[c].astype(float)
+    df = df.sort_values("open_time").tail(limit).reset_index(drop=True)
+    return df
 
 
 # ── Features ──────────────────────────────────────────────────────────────────
@@ -741,13 +753,7 @@ with c4:
 
 strategy = list(STRATEGIES.keys())[0]  # default for metrics display
 
-# Show futures badge if applicable
-if symbol in FUTURES_PAIRS:
-    st.markdown('''<div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;
-    letter-spacing:0.15em;color:#ffc800;background:rgba(255,200,0,0.08);
-    border:1px solid rgba(255,200,0,0.25);border-radius:4px;
-    padding:0.35rem 0.8rem;margin-bottom:0.8rem;display:inline-block;">
-    ⚡ FUTURES PAIR · DATA FROM BINANCE PERPETUALS</div>''', unsafe_allow_html=True)
+
 
 if run or "df" not in st.session_state:
     with st.spinner("Fetching live data..."):
