@@ -169,6 +169,7 @@ COINGECKO_IDS = {
     "XRPUSDT":  "ripple",
     "DOGEUSDT": "dogecoin",
     "XPLUSDT":  "xplus",
+    "XAUTUSDT": "tether-gold",
 }
 
 # CoinGecko free tier: OHLC endpoint only supports 1,7,14,30 days max
@@ -761,7 +762,7 @@ st.markdown("""
 
 c1, c2, c3, c4 = st.columns([2.5, 2.5, 2.5, 1.5])
 with c1:
-    symbol   = st.selectbox("PAIR", ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","XPLUSDT"])
+    symbol   = st.selectbox("PAIR", ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","XPLUSDT","XAUTUSDT"])
 with c2:
     interval = st.selectbox("TIMEFRAME", ["1m","5m","15m","1h","4h","1d"], index=3)
 with c3:
