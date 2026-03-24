@@ -171,27 +171,45 @@ COINGECKO_IDS = {
     "XPLUSDT":  "xplus",
 }
 
+# CoinGecko free tier: OHLC endpoint only supports 1,7,14,30 days max
 INTERVAL_DAYS = {
-    "1m": 1, "5m": 3, "15m": 7,
-    "1h": 14, "4h": 60, "1d": 300,
+    "1m": 1, "5m": 1, "15m": 7,
+    "1h": 14, "4h": 30, "1d": 30,
 }
 
-# ── Data — CoinGecko OHLC (no geo-restrictions, free, no key needed) ──────────
+# ── Data — CoinGecko with market_chart fallback ───────────────────────────────
 @st.cache_data(ttl=60)
 def fetch_binance(symbol: str, interval: str, limit: int = 300) -> pd.DataFrame:
     coin_id = COINGECKO_IDS.get(symbol, "bitcoin")
     days    = INTERVAL_DAYS.get(interval, 14)
 
+    # Try OHLC endpoint first
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
     r   = requests.get(url, params={"vs_currency": "usd", "days": days}, timeout=15)
-    r.raise_for_status()
-    data = r.json()  # [[timestamp, open, high, low, close], ...]
 
-    df = pd.DataFrame(data, columns=["open_time","open","high","low","close"])
+    if r.status_code == 200:
+        data = r.json()
+        if data:
+            df = pd.DataFrame(data, columns=["open_time","open","high","low","close"])
+            df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
+            df["volume"]    = df["close"] * 1000
+            for c in ["open","high","low","close"]:
+                df[c] = df[c].astype(float)
+            df = df.sort_values("open_time").tail(limit).reset_index(drop=True)
+            return df
+
+    # Fallback: market_chart gives close prices — reconstruct OHLC from it
+    url2 = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+    r2   = requests.get(url2, params={"vs_currency": "usd", "days": days}, timeout=15)
+    r2.raise_for_status()
+    prices = r2.json()["prices"]  # [[timestamp, price], ...]
+    df = pd.DataFrame(prices, columns=["open_time","close"])
     df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
-    df["volume"]    = df["close"] * 1000  # CoinGecko OHLC has no volume; use proxy
-    for c in ["open","high","low","close"]:
-        df[c] = df[c].astype(float)
+    df["close"]  = df["close"].astype(float)
+    df["open"]   = df["close"].shift(1).fillna(df["close"])
+    df["high"]   = df[["open","close"]].max(axis=1) * 1.001
+    df["low"]    = df[["open","close"]].min(axis=1) * 0.999
+    df["volume"] = df["close"] * 1000
     df = df.sort_values("open_time").tail(limit).reset_index(drop=True)
     return df
 
